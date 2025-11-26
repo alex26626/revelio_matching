@@ -1,0 +1,306 @@
+import pandas as pd
+import numpy as np
+import os
+from tqdm import tqdm
+import json
+import time
+from typing import Tuple, List, Optional
+import psutil
+import argparse
+import sys
+
+from sentence_transformers import SentenceTransformer  # For sentence embeddings
+from sklearn.metrics.pairwise import cosine_similarity
+from collections import Counter
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--model_name")
+parser.add_argument("--columns_mappings_index")
+
+cmdargs = parser.parse_args()
+MODEL_NAME = cmdargs.model_name
+COLUMN_MAPPINGS_INDEX = cmdargs.columns_mappings_index
+TEMPORARY_THRESHOLD = 1000 # TO BE REMOVED
+
+# Folders directories
+EMBEDDINGS_FILES_FOLDER = f"/Users/jing/Documents/RaShips/revelio_matching/embeddings_files/embeddings_{COLUMN_MAPPINGS_INDEX}"
+PROCESSED_FOLDER = '/Users/jing/Documents/RaShips/revelio_matching/Processed'
+OUTPUT_FOLDER = '/Users/jing/Documentscolumn/RaShips/revelio_matching/alex_outputs'
+EMBEDDINGS_FILES_LEGEND = "/Users/jing/Documents/RaShips/revelio_matching/embeddings_files/embeddings_inputs_legend.json"
+ROOT = "/Users/jing/Documents/RaShips/revelio_matching"
+
+def print_memory():
+    process = psutil.Process(os.getpid())
+    mem_gb = process.memory_info().rss / 1e9
+    tqdm.write(f"Current memory usage: {mem_gb:.2f} GB")
+    return mem_gb
+
+def get_all_position_files() -> pd.DataFrame:
+
+    all_cleaned_positions = pd.DataFrame()
+    processed_files = os.listdir(PROCESSED_FOLDER)
+
+    for file in processed_files:
+
+        if "individual_position" in file:
+
+            if 'csv' in file:
+                cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file}')
+            elif ".parquet" in file:
+                cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file}')
+            else:
+                cleaned_file = pd.DataFrame()
+
+            all_cleaned_positions = pd.concat([all_cleaned_positions, cleaned_file])
+            del cleaned_file
+
+    all_cleaned_positions.drop_duplicates(inplace=True)
+    all_cleaned_positions.reset_index(drop = True, inplace=True)
+    
+    return all_cleaned_positions
+
+def generate_embedding_inputs(columns_mappings: dict, data: pd.DataFrame) -> list[str]:
+
+    embedding_inputs = []
+
+    for i in tqdm(range(data.shape[0])):
+        embedding_input = ''
+        for column, embedding_text in columns_mappings.items():
+            feature_to_insert = data.loc[i, column]
+            if pd.notna(feature_to_insert):
+                embedding_input += f'{embedding_text}: {feature_to_insert}, '
+        embedding_inputs.append(embedding_input)
+
+    return embedding_inputs
+
+def append_to_json(file_path: str, new_data: dict, dataset: str):
+    """Safely append new embeddings to a JSON file by entity type."""
+
+    # --- Step 1: Load existing JSON safely ---
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r") as f:
+                all_data = json.load(f)
+        except json.JSONDecodeError:
+            tqdm.write(f"⚠️ Corrupted JSON file detected: {file_path}. Starting fresh.")
+            all_data = {}
+    else:
+        all_data = {}
+
+    # --- Step 2: Ensure the structure exists ---
+    if dataset not in all_data:
+        all_data[dataset] = {}
+
+    existing_data = all_data[dataset]
+
+    tqdm.write(f"📦 Existing {dataset} entries: {len(existing_data)}")
+
+    # --- Step 3: Merge new data ---
+    added = 0
+    for key, value in new_data.get(dataset, {}).items():
+        if key not in existing_data:
+            existing_data[key] = value
+            added += 1
+
+    all_data[dataset] = existing_data
+
+    tqdm.write(f"➕ Added {added} new {dataset} entries")
+
+    # --- Step 4: Atomic write to prevent corruption ---
+    tmp_path = f"{file_path}.tmp"
+    with open(tmp_path, "w") as tmp:
+        json.dump(all_data, tmp, indent=2)
+    os.replace(tmp_path, file_path)
+
+    tqdm.write(f"✅ JSON updated and saved to {file_path}")
+
+def chunk_text(text: str, tokenizer, max_tokens: float) -> Tuple[List[str], float]:
+
+    len_text = len(text)
+    words = text.split()
+    chunks, current_chunk = [], []
+    current_length = 0
+
+    for word in words:
+        word_len = len(tokenizer.tokenize(word))
+        if current_length + word_len > max_tokens:
+            chunk_string = " ".join(current_chunk)
+            if MODEL_NAME == "intfloat/multilingual-e5-small":
+                chunk_string = f"query: {chunk_string}"
+            chunks.append(chunk_string)
+            current_chunk = []
+            current_length = 0
+        current_chunk.append(word)
+        current_length += word_len
+    if current_chunk:
+        chunk_string = " ".join(current_chunk)
+        if MODEL_NAME == "intfloat/multilingual-e5-small":
+            chunk_string = f"query: {chunk_string}"
+        chunks.append(chunk_string)
+    return chunks, len_text
+
+# Build general embeddings function
+
+def generate_embeddings(
+    embeddings_dict: dict, 
+    dataset: str, 
+    dir_list: List[str], 
+    texts_list: List[str], 
+    model: SentenceTransformer, 
+    model_name: str,
+    file_name: str,
+) -> dict:
+    
+    tqdm.write(f"🚀 Working on {dataset} with model {model_name}")
+
+    # Handle special models requiring trust_remote_code
+    trust_remote_code = model_name in [
+        "Lajavaness/bilingual-embedding-small",
+        "Alibaba-NLP/gte-multilingual-base"
+    ]
+
+    # Clean model name for filename
+    safe_model_name = model_name.split('/')[-1]
+    output_name = f"{ROOT}/embeddings_files/embeddings_{COLUMN_MAPPINGS_INDEX}/{file_name}_{safe_model_name}.json"
+    tokenizer = model.tokenizer
+    max_tokens = tokenizer.model_max_length
+    embeddings_counter = 0
+
+    # --- Load existing embeddings to resume ---
+    existing_dirs = set()
+    if os.path.exists(output_name):
+        try:
+            with open(output_name, "r") as file:
+                current_embeddings = json.load(file)
+            existing_dirs = set(current_embeddings.get(dataset, {}).keys())
+            tqdm.write(f"📂 Found existing {len(existing_dirs)} {dataset} embeddings. Skipping duplicates.")
+        except json.JSONDecodeError:
+            tqdm.write(f"⚠️ Corrupted JSON detected at {output_name}, starting fresh.")
+            current_embeddings = {}
+    else:
+        current_embeddings = {}
+
+    # Ensure structure
+    if dataset not in embeddings_dict:
+        embeddings_dict[dataset] = {}
+
+    # --- Main loop ---
+    for i in tqdm(range(len(dir_list)), desc=f"Embedding {dataset}"):
+        text_complete = texts_list[i]
+        dir_id = dir_list[i]
+
+        # Skip if already embedded
+        if dir_id in existing_dirs:
+            continue
+
+        if not (pd.notna(text_complete) and isinstance(text_complete, str) and text_complete.strip()):
+            continue
+
+        # --- Process text ---
+        start = time.time()
+        text_chunks, len_text = chunk_text(text=text_complete, tokenizer=tokenizer, max_tokens=max_tokens)
+        embeddings_dict[dataset]['length_text'] = len_text
+
+        tqdm.write(f"📝 Text length: {len_text} chars")
+
+        entity_embedding = model.encode(
+            text_chunks,
+            convert_to_tensor=False,
+            trust_remote_code=trust_remote_code
+        )
+        end = time.time()
+        embeddings_counter += 1
+
+        embedding_time = round(end - start, 2)
+        tqdm.write(f"⏱️ Embedding time: {embedding_time} sec")
+
+        # Average embedding across chunks
+        mean_embedding = entity_embedding.mean(axis=0).astype(float).tolist()
+
+        embeddings_dict[dataset][dir_id] = mean_embedding
+        memory_usage = print_memory()
+        embeddings_dict[dataset]['memory_GB'] = memory_usage
+
+        # --- Periodic saving ---
+        if len(embeddings_dict[dataset].keys()) % 5 == 0:
+            append_to_json(file_path=output_name, new_data=embeddings_dict, dataset=dataset)
+            tqdm.write(f"💾 Saved progress after {len(embeddings_dict[dataset])} embeddings.")
+            # small sleep to prevent I/O overload
+            if embeddings_counter == 100:
+                tqdm.write(f"💾 Saved 100 embeddiings, restarting")
+                time.sleep(60)
+            else:
+                time.sleep(0.5)
+            embeddings_dict[dataset] = {}
+            
+
+    # --- Final save ---
+    if embeddings_dict[dataset]:
+        append_to_json(file_path=output_name, new_data=embeddings_dict, dataset=dataset)
+        tqdm.write("✅ Final save completed.")
+
+    return embeddings_dict
+
+# --- Load Data ---
+# Load the cleaned pitchbook and position files
+
+if not os.path.exists(EMBEDDINGS_FILES_FOLDER):
+    os.makedirs(EMBEDDINGS_FILES_FOLDER)
+
+with open(EMBEDDINGS_FILES_LEGEND, 'r') as file:
+    columns_mappings_legend = json.load(file)
+
+columns_mappings = columns_mappings_legend.get(COLUMN_MAPPINGS_INDEX)
+pitchbook_mappings = columns_mappings.get('pitchbook')
+position_mappings = columns_mappings.get('position')
+
+cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
+all_cleaned_positions = get_all_position_files()
+all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x : x['rcid'] + '_' + str(x.name), axis = 1)
+
+# Extract company and investor directory paths
+pitchbook_ids = cleaned_pitchbook.companyid.to_list()[:TEMPORARY_THRESHOLD]
+positions_ids_first = all_cleaned_positions.rcid.to_list()[:TEMPORARY_THRESHOLD]
+positions_ids = [str(id) for id in positions_ids_first]
+
+# Extract homepage texts for both companies and investors
+tqdm.write('Generating embedding inputs for pitchbook')
+pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)[:TEMPORARY_THRESHOLD]
+tqdm.write('Generating embedding inputs for position')
+position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=all_cleaned_positions)[:TEMPORARY_THRESHOLD]
+
+# --- Generate Embeddings from Homepage Texts ---
+
+# Load the sentence transformer model
+TRUST_REMOTE_CODE = MODEL_NAME in [
+        "Lajavaness/bilingual-embedding-small",
+        "Alibaba-NLP/gte-multilingual-base"
+    ]
+model = SentenceTransformer(model_name_or_path=MODEL_NAME, trust_remote_code=TRUST_REMOTE_CODE)
+tokenizer = model.tokenizer
+max_length = tokenizer.model_max_length
+
+# Dictionary to store all embeddings
+all_embeddings = dict()
+all_embeddings['pitchbook'] = dict()
+all_embeddings['position'] = dict()
+
+# Encode company homepage texts
+
+all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
+                                     dataset='pitchbook',
+                                     dir_list=pitchbook_ids,
+                                     texts_list=pitchbook_texts,
+                                     model=model,
+                                     model_name=MODEL_NAME,
+                                     file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
+
+# Encode investor homepage texts
+all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
+                                     dataset='position',
+                                     dir_list=positions_ids,
+                                     texts_list=position_texts,
+                                     model=model,
+                                     model_name=MODEL_NAME,
+                                     file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
+

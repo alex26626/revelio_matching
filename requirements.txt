@@ -1,0 +1,7 @@
+pandas
+numpy
+tqdm
+psutil
+argparse
+sentence-transformers
+scikit-learn
