@@ -20,7 +20,7 @@ parser.add_argument("--columns_mappings_index")
 cmdargs = parser.parse_args()
 MODEL_NAME = cmdargs.model_name
 COLUMN_MAPPINGS_INDEX = cmdargs.columns_mappings_index
-TEMPORARY_THRESHOLD = 1000 # TO BE REMOVED
+TEMPORARY_THRESHOLD = 1000
 
 # Folders directories
 EMBEDDINGS_FILES_FOLDER = f"/Users/jing/Documents/RaShips/revelio_matching/embeddings_files/embeddings_{COLUMN_MAPPINGS_INDEX}"
@@ -199,15 +199,19 @@ def generate_embeddings(
         # --- Process text ---
         start = time.time()
         text_chunks, len_text = chunk_text(text=text_complete, tokenizer=tokenizer, max_tokens=max_tokens)
-        embeddings_dict[dataset]['length_text'] = len_text
+        #embeddings_dict[dataset]['length_text'] = len_text
 
         tqdm.write(f"📝 Text length: {len_text} chars")
 
-        entity_embedding = model.encode(
+        if trust_remote_code:
+            entity_embedding = model.encode(
+                text_chunks,
+                convert_to_tensor=False,
+                trust_remote_code=trust_remote_code)
+        else:
+            entity_embedding = model.encode(
             text_chunks,
-            convert_to_tensor=False,
-            trust_remote_code=trust_remote_code
-        )
+            convert_to_tensor=False)
         end = time.time()
         embeddings_counter += 1
 
@@ -219,16 +223,16 @@ def generate_embeddings(
 
         embeddings_dict[dataset][dir_id] = mean_embedding
         memory_usage = print_memory()
-        embeddings_dict[dataset]['memory_GB'] = memory_usage
+        #embeddings_dict[dataset]['memory_GB'] = memory_usage
 
         # --- Periodic saving ---
         if len(embeddings_dict[dataset].keys()) % 5 == 0:
             append_to_json(file_path=output_name, new_data=embeddings_dict, dataset=dataset)
             tqdm.write(f"💾 Saved progress after {len(embeddings_dict[dataset])} embeddings.")
             # small sleep to prevent I/O overload
-            if embeddings_counter == 100:
-                tqdm.write(f"💾 Saved 100 embeddiings, restarting")
-                time.sleep(60)
+            if embeddings_counter % 200 == 0:
+                tqdm.write(f"💾 Saved 100 embeddiings, pausing")
+                time.sleep(10)
             else:
                 time.sleep(0.5)
             embeddings_dict[dataset] = {}
@@ -256,11 +260,11 @@ position_mappings = columns_mappings.get('position')
 
 cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
 all_cleaned_positions = get_all_position_files()
-all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x : x['rcid'] + '_' + str(x.name), axis = 1)
+all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x : str(x['rcid']) + '_' + str(x.name), axis = 1)
 
 # Extract company and investor directory paths
 pitchbook_ids = cleaned_pitchbook.companyid.to_list()[:TEMPORARY_THRESHOLD]
-positions_ids_first = all_cleaned_positions.rcid.to_list()[:TEMPORARY_THRESHOLD]
+positions_ids_first = all_cleaned_positions.id.to_list()[:TEMPORARY_THRESHOLD]
 positions_ids = [str(id) for id in positions_ids_first]
 
 # Extract homepage texts for both companies and investors

@@ -5,3 +5,4 @@ psutil
 argparse
 sentence-transformers
 scikit-learn
+openpyxl
