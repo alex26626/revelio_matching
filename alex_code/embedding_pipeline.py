@@ -20,14 +20,13 @@ parser.add_argument("--columns_mappings_index")
 cmdargs = parser.parse_args()
 MODEL_NAME = cmdargs.model_name
 COLUMN_MAPPINGS_INDEX = cmdargs.columns_mappings_index
-TEMPORARY_THRESHOLD = 1000
 
 # Folders directories
-EMBEDDINGS_FILES_FOLDER = f"/Users/jing/Documents/RaShips/revelio_matching/embeddings_files/embeddings_{COLUMN_MAPPINGS_INDEX}"
-PROCESSED_FOLDER = '/Users/jing/Documents/RaShips/revelio_matching/Processed'
-OUTPUT_FOLDER = '/Users/jing/Documentscolumn/RaShips/revelio_matching/alex_outputs'
-EMBEDDINGS_FILES_LEGEND = "/Users/jing/Documents/RaShips/revelio_matching/embeddings_files/embeddings_inputs_legend.json"
 ROOT = "/Users/jing/Documents/RaShips/revelio_matching"
+EMBEDDINGS_FILES_FOLDER = f"{ROOT}/embeddings_files/embeddings_{COLUMN_MAPPINGS_INDEX}"
+PROCESSED_FOLDER = f'{ROOT}/Processed'
+OUTPUT_FOLDER = f'{ROOT}/alex_outputs'
+EMBEDDINGS_FILES_LEGEND = f"{ROOT}/embeddings_files/embeddings_inputs_legend.json"
 
 def print_memory():
     process = psutil.Process(os.getpid())
@@ -263,15 +262,15 @@ all_cleaned_positions = get_all_position_files()
 all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x : str(x['rcid']) + '_' + str(x.name), axis = 1)
 
 # Extract company and investor directory paths
-pitchbook_ids = cleaned_pitchbook.companyid.to_list()[:TEMPORARY_THRESHOLD]
-positions_ids_first = all_cleaned_positions.id.to_list()[:TEMPORARY_THRESHOLD]
+pitchbook_ids = cleaned_pitchbook.companyid.to_list()
+positions_ids_first = all_cleaned_positions.id.to_list()
 positions_ids = [str(id) for id in positions_ids_first]
 
 # Extract homepage texts for both companies and investors
 tqdm.write('Generating embedding inputs for pitchbook')
-pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)[:TEMPORARY_THRESHOLD]
+pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)
 tqdm.write('Generating embedding inputs for position')
-position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=all_cleaned_positions)[:TEMPORARY_THRESHOLD]
+position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=all_cleaned_positions)
 
 # --- Generate Embeddings from Homepage Texts ---
 
