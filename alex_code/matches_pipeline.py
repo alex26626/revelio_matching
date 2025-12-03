@@ -16,29 +16,59 @@ from collections import Counter
 print("Running file:", __file__)
 print("cwd:", os.getcwd())
 
-def get_all_position_files() -> pd.DataFrame:
+def get_all_position_files() -> list[str]:
 
-    all_cleaned_positions = pd.DataFrame()
+    cleaned_file_files = list()
     processed_files = os.listdir(PROCESSED_FOLDER)
 
     for file in processed_files:
 
         if "individual_position" in file:
 
-            if 'csv' in file:
-                cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file}')
-            elif ".parquet" in file:
-                cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file}')
-            else:
-                cleaned_file = pd.DataFrame()
+            cleaned_file_files.append(file)
 
-            all_cleaned_positions = pd.concat([all_cleaned_positions, cleaned_file])
-            del cleaned_file
+    #         if 'csv' in file:
+    #             cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file}')
+    #         elif ".parquet" in file:
+    #             cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file}')
+    #         else:
+    #             cleaned_file = pd.DataFrame()
 
-    all_cleaned_positions.drop_duplicates(inplace=True)
-    all_cleaned_positions.reset_index(drop = True, inplace=True)
+    #         cleaned_file = pd.concat([cleaned_file, cleaned_file])
+    #         del cleaned_file
+
+    # cleaned_file.drop_duplicates(inplace=True)
+    # cleaned_file.reset_index(drop = True, inplace=True)
     
-    return all_cleaned_positions
+    return cleaned_file_files
+
+def get_index_position_file_mapping(cleaned_file_files: list[str]) -> Tuple[dict, dict]:
+
+    shift = 0
+    index_file_mapping = dict()
+    shifted_original_mapping = dict()
+
+    for file_name in cleaned_file_files:
+
+        if 'csv' in file_name:
+            cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file_name}')
+        elif ".parquet" in file_name:
+            cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file_name}')
+        else:
+            cleaned_file = pd.DataFrame()
+        
+        if cleaned_file.shape[0] > 0:
+
+            for index in cleaned_file.index:
+                index_file_mapping[index + shift] = file_name
+                shifted_original_mapping[index + shift] = index
+            
+            shift += cleaned_file.shape[0]
+
+            del cleaned_file
+    
+    return index_file_mapping, shifted_original_mapping
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--embeddings_file_dir")
@@ -61,8 +91,7 @@ if not os.path.exists(OUTPUT_FOLDER):
     os.makedirs(OUTPUT_FOLDER)
 
 cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
-all_cleaned_positions = get_all_position_files()
-all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x: str(x['rcid']) + '_' + str(x.name), axis = 1)
+all_cleaned_position_files = get_all_position_files()
 
 pb_embeddings_first = embeddings.get('pitchbook')
 pos_embeddings_first = embeddings.get('position')
@@ -88,6 +117,9 @@ matches['sim_score'] = []
 i = 0
 total = min(len(pos_embeddings), len(pb_embeddings))
 
+index_position_mapping, shifted_original_mapping = get_index_position_file_mapping(cleaned_file_files=all_cleaned_position_files)
+file_to_be_opened = ''
+
 with tqdm(total=total) as p_bar:
 
     while i < total:
@@ -97,14 +129,24 @@ with tqdm(total=total) as p_bar:
         max_pos_coordinate = max_coordinates[0][0]
         max_pb_coordinate = max_coordinates[1][0]
 
-        for column in pos_column_mapping.keys():
-            if column not in all_cleaned_positions.columns:
-                continue
-            col_name = f'{column}_pos'
-            if col_name not in matches:
-                matches[col_name] = []
-            matches[col_name].append(all_cleaned_positions.loc[max_pos_coordinate, column])
+        max_pos_embedding = pos_embeddings[max_pos_coordinate]
+        for k,v in pos_filtered.items():
+            if v == max_pos_embedding:
+                max_k = int(k.split('_')[-1])
 
+        if index_position_mapping[max_k] != file_to_be_opened:
+
+            file_to_be_opened = index_position_mapping[max_k]
+            cleaned_file = pd.read_parquet(f"{PROCESSED_FOLDER}/{file_to_be_opened}")
+
+        for column in pos_column_mapping.keys():
+
+            if column in cleaned_file.columns and shifted_original_mapping[max_k] in cleaned_file.index:
+
+                col_name = f'{column}_pos'
+                if col_name not in matches:
+                    matches[col_name] = []
+                matches[col_name].append(cleaned_file.loc[shifted_original_mapping[max_k], column])
 
         for column in pb_column_mapping.keys():
             if column not in cleaned_pitchbook.columns:
