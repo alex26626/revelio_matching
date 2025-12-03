@@ -28,44 +28,48 @@ PROCESSED_FOLDER = f'{ROOT}/Processed'
 OUTPUT_FOLDER = f'{ROOT}/alex_outputs'
 EMBEDDINGS_FILES_LEGEND = f"{ROOT}/embeddings_files/embeddings_inputs_legend.json"
 
+THRESHOLD = 1000
+
 def print_memory():
     process = psutil.Process(os.getpid())
     mem_gb = process.memory_info().rss / 1e9
     tqdm.write(f"Current memory usage: {mem_gb:.2f} GB")
     return mem_gb
 
-def get_all_position_files() -> pd.DataFrame:
+def get_all_position_files() -> list[str]:
 
-    all_cleaned_positions = pd.DataFrame()
+    cleaned_file_files = list()
     processed_files = os.listdir(PROCESSED_FOLDER)
 
     for file in processed_files:
 
         if "individual_position" in file:
 
-            if 'csv' in file:
-                cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file}')
-            elif ".parquet" in file:
-                cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file}')
-            else:
-                cleaned_file = pd.DataFrame()
+            cleaned_file_files.append(file)
 
-            all_cleaned_positions = pd.concat([all_cleaned_positions, cleaned_file])
-            del cleaned_file
+    #         if 'csv' in file:
+    #             cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{file}')
+    #         elif ".parquet" in file:
+    #             cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{file}')
+    #         else:
+    #             cleaned_file = pd.DataFrame()
 
-    all_cleaned_positions.drop_duplicates(inplace=True)
-    all_cleaned_positions.reset_index(drop = True, inplace=True)
+    #         cleaned_file = pd.concat([cleaned_file, cleaned_file])
+    #         del cleaned_file
+
+    # cleaned_file.drop_duplicates(inplace=True)
+    # cleaned_file.reset_index(drop = True, inplace=True)
     
-    return all_cleaned_positions
+    return cleaned_file_files
 
-def generate_embedding_inputs(columns_mappings: dict, data: pd.DataFrame) -> list[str]:
+def generate_embedding_inputs(columns_mappings: dict, data: pd.DataFrame, shift: int = 0) -> list[str]:
 
     embedding_inputs = []
 
     for i in tqdm(range(data.shape[0])):
         embedding_input = ''
         for column, embedding_text in columns_mappings.items():
-            feature_to_insert = data.loc[i, column]
+            feature_to_insert = data.loc[i + shift, column]
             if pd.notna(feature_to_insert):
                 embedding_input += f'{embedding_text}: {feature_to_insert}, '
         embedding_inputs.append(embedding_input)
@@ -258,23 +262,9 @@ pitchbook_mappings = columns_mappings.get('pitchbook')
 position_mappings = columns_mappings.get('position')
 
 cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
-all_cleaned_positions = get_all_position_files()
-all_cleaned_positions['id'] = all_cleaned_positions.apply(lambda x : str(x['rcid']) + '_' + str(x.name), axis = 1)
+cleaned_files_names = get_all_position_files()
 
-# Extract company and investor directory paths
-pitchbook_ids = cleaned_pitchbook.companyid.to_list()
-positions_ids_first = all_cleaned_positions.id.to_list()
-positions_ids = [str(id) for id in positions_ids_first]
-
-# Extract homepage texts for both companies and investors
-tqdm.write('Generating embedding inputs for pitchbook')
-pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)
-tqdm.write('Generating embedding inputs for position')
-position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=all_cleaned_positions)
-
-# --- Generate Embeddings from Homepage Texts ---
-
-# Load the sentence transformer model
+ # Load the sentence transformer model
 TRUST_REMOTE_CODE = MODEL_NAME in [
         "Lajavaness/bilingual-embedding-small",
         "Alibaba-NLP/gte-multilingual-base"
@@ -288,22 +278,56 @@ all_embeddings = dict()
 all_embeddings['pitchbook'] = dict()
 all_embeddings['position'] = dict()
 
-# Encode company homepage texts
+pitchbook_ids = cleaned_pitchbook.companyid.to_list()[: THRESHOLD]
+
+# Generating embeddings for pitchbook
+tqdm.write('Generating embedding inputs for pitchbook')
+pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)[: THRESHOLD]
 
 all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
-                                     dataset='pitchbook',
-                                     dir_list=pitchbook_ids,
-                                     texts_list=pitchbook_texts,
-                                     model=model,
-                                     model_name=MODEL_NAME,
-                                     file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
+                                            dataset='pitchbook',
+                                            dir_list=pitchbook_ids,
+                                            texts_list=pitchbook_texts,
+                                            model=model,
+                                            model_name=MODEL_NAME,
+                                            file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
 
-# Encode investor homepage texts
-all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
-                                     dataset='position',
-                                     dir_list=positions_ids,
-                                     texts_list=position_texts,
-                                     model=model,
-                                     model_name=MODEL_NAME,
-                                     file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
+shift = 0
+
+tqdm.write('Iterating over positions files:')
+
+for position_file_name in tqdm(cleaned_files_names):
+
+    if 'csv' in position_file_name:
+        cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{position_file_name}')
+    elif ".parquet" in position_file_name:
+        cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{position_file_name}')
+    else:
+        cleaned_file = pd.DataFrame()
+
+    if cleaned_file.shape[0] > 0:
+        
+        cleaned_file.index = cleaned_file.index + shift
+        cleaned_file['id'] = cleaned_file.apply(lambda x : str(x['rcid']) + '_' + str(x.name), axis = 1)
+
+        # Extract positions company ids
+        positions_ids_first = cleaned_file.id.to_list()[: THRESHOLD//6]
+        positions_ids = [str(id) for id in positions_ids_first]
+        
+        tqdm.write('Generating embedding inputs for position')
+        position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=cleaned_file, shift=shift)[: THRESHOLD//6]
+
+        # --- Generate Embeddings for positions file --
+        
+        # Encode position files
+        all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
+                                            dataset='position',
+                                            dir_list=positions_ids,
+                                            texts_list=position_texts,
+                                            model=model,
+                                            model_name=MODEL_NAME,
+                                            file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
+        
+        shift += cleaned_file.shape[0]
+        del cleaned_file
 
