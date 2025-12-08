@@ -234,11 +234,14 @@ def generate_embeddings(
             tqdm.write(f"💾 Saved progress after {len(embeddings_dict[dataset])} embeddings.")
             # small sleep to prevent I/O overload
             if embeddings_counter % 200 == 0:
-                tqdm.write(f"💾 Saved 100 embeddiings, pausing")
+                tqdm.write(f"💾 Saved 200 embeddiings, pausing")
                 time.sleep(10)
             else:
                 time.sleep(0.5)
             embeddings_dict[dataset] = {}
+
+        if embeddings_counter == THRESHOLD:
+            sys.exit(f"{THRESHOLD} embeddings generated, stopping the code and then restarting")
             
 
     # --- Final save ---
@@ -278,11 +281,11 @@ all_embeddings = dict()
 all_embeddings['pitchbook'] = dict()
 all_embeddings['position'] = dict()
 
-pitchbook_ids = cleaned_pitchbook.companyid.to_list()[: THRESHOLD]
+pitchbook_ids = cleaned_pitchbook.companyid.to_list()
 
 # Generating embeddings for pitchbook
 tqdm.write('Generating embedding inputs for pitchbook')
-pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)[: THRESHOLD]
+pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)
 
 all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
                                             dataset='pitchbook',
@@ -311,11 +314,11 @@ for position_file_name in tqdm(cleaned_files_names):
         cleaned_file['id'] = cleaned_file.apply(lambda x : str(x['rcid']) + '_' + str(x.name), axis = 1)
 
         # Extract positions company ids
-        positions_ids_first = cleaned_file.id.to_list()[: THRESHOLD//6]
+        positions_ids_first = cleaned_file.id.to_list()
         positions_ids = [str(id) for id in positions_ids_first]
         
         tqdm.write('Generating embedding inputs for position')
-        position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=cleaned_file, shift=shift)[: THRESHOLD//6]
+        position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=cleaned_file, shift=shift)
 
         # --- Generate Embeddings for positions file --
         

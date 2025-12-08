@@ -1,5 +1,7 @@
 import json
 import subprocess
+import os
+import pandas as pd
 
 
 MODELS = [
@@ -13,6 +15,8 @@ MODELS = [
 ROOT = "/Users/jing/Documents/RaShips/revelio_matching"
 EMBEDDINGS_INPUTS_LEGEND_DIR = f"{ROOT}/embeddings_files/embeddings_inputs_legend.json"
 
+
+
 with open(EMBEDDINGS_INPUTS_LEGEND_DIR) as file:
     embeddings_legend = json.load(file)
 
@@ -21,6 +25,7 @@ embeddings_legend_indexes = list(embeddings_legend.keys())
 for model in MODELS:
 
     for index in embeddings_legend_indexes:
+            
 
         subprocess.run([
             "python3",
