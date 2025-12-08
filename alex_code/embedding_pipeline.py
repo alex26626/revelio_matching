@@ -28,7 +28,7 @@ PROCESSED_FOLDER = f'{ROOT}/Processed'
 OUTPUT_FOLDER = f'{ROOT}/alex_outputs'
 EMBEDDINGS_FILES_LEGEND = f"{ROOT}/embeddings_files/embeddings_inputs_legend.json"
 
-THRESHOLD = 1000
+THRESHOLD = 2000
 
 def print_memory():
     process = psutil.Process(os.getpid())
@@ -189,6 +189,8 @@ def generate_embeddings(
 
     # --- Main loop ---
     for i in tqdm(range(len(dir_list)), desc=f"Embedding {dataset}"):
+
+        iteration_start = time.time()
         text_complete = texts_list[i]
         dir_id = dir_list[i]
 
@@ -229,16 +231,23 @@ def generate_embeddings(
         #embeddings_dict[dataset]['memory_GB'] = memory_usage
 
         # --- Periodic saving ---
-        if len(embeddings_dict[dataset].keys()) % 5 == 0:
+        if len(embeddings_dict[dataset].keys()) % 2000 == 0:
             append_to_json(file_path=output_name, new_data=embeddings_dict, dataset=dataset)
             tqdm.write(f"💾 Saved progress after {len(embeddings_dict[dataset])} embeddings.")
-            # small sleep to prevent I/O overload
-            if embeddings_counter % 200 == 0:
-                tqdm.write(f"💾 Saved 200 embeddiings, pausing")
-                time.sleep(10)
-            else:
-                time.sleep(0.5)
             embeddings_dict[dataset] = {}
+
+            # small sleep to prevent I/O overload
+
+        iteration_end = time.time()
+        iteration_time = (iteration_end - iteration_start)
+        tqdm.write(f'ITERATION TIME: {round(iteration_time, 2)}')
+
+        if embeddings_counter % 1000 == 0:
+            tqdm.write(f"💾 Saved 1000 embeddiings, pausing")
+            time.sleep(10)
+        else:
+            time.sleep(0.5)
+
 
         if embeddings_counter == THRESHOLD:
             sys.exit(f"{THRESHOLD} embeddings generated, stopping the code and then restarting")
