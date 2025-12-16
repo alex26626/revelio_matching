@@ -133,8 +133,9 @@ with tqdm(total=total) as p_bar:
 
         max_pos_embedding = pos_embeddings[max_pos_coordinate]
         max_pos_index = pos_indexes[max_pos_coordinate]
-        max_pos_file = '_'.join(max_pos_index.split('_')[1:])
-        max_pos_position = max_pos_index.split('_')[0]
+        max_pos_file = '_'.join(max_pos_index.split('_')[2:])
+        max_pos_rcid = float(max_pos_index.split('_')[1])
+        max_pos_file_index = int(max_pos_index.split('_')[0])
 
         if max_pos_file != file_to_be_opened:
 
@@ -143,12 +144,12 @@ with tqdm(total=total) as p_bar:
 
         for column in pos_column_mapping.keys():
 
-            if column in cleaned_file.columns and max_pos_position in cleaned_file.index:
+            if column in cleaned_file.columns and max_pos_rcid in cleaned_file.rcid.values:
 
                 col_name = f'{column}_pos'
                 if col_name not in matches:
                     matches[col_name] = []
-                matches[col_name].append(cleaned_file.loc[max_pos_position, column])
+                matches[col_name].append(cleaned_file.loc[cleaned_file.index == max_pos_file_index, column].iloc[0])
 
         for column in pb_column_mapping.keys():
             if column not in cleaned_pitchbook.columns:

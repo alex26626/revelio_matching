@@ -231,12 +231,12 @@ def generate_embeddings(
         #embeddings_dict[dataset]['memory_GB'] = memory_usage
 
         # --- Periodic saving ---
-        if len(embeddings_dict[dataset].keys()) % 5 == 0:
+        if len(embeddings_dict[dataset].keys()) % 2000 == 0:
             append_to_json(file_path=output_name, new_data=embeddings_dict, dataset=dataset)
             tqdm.write(f"💾 Saved progress after {len(embeddings_dict[dataset])} embeddings.")
             # small sleep to prevent I/O overload
-            if embeddings_counter % 200 == 0:
-                tqdm.write(f"💾 Saved 100 embeddiings, pausing")
+            if embeddings_counter % 1000 == 0:
+                tqdm.write(f"💾 Saved 1000 embeddiings, pausing")
                 time.sleep(10)
             else:
                 time.sleep(0.5)
