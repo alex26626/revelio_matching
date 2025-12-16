@@ -16,13 +16,13 @@ from collections import Counter
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_name")
 parser.add_argument("--columns_mappings_index")
-parser.add_argument("--position_file_dir")
+parser.add_argument("--pitchbook_file_dir")
 
 cmdargs = parser.parse_args()
 MODEL_NAME = cmdargs.model_name
 COLUMN_MAPPINGS_INDEX = cmdargs.columns_mappings_index
-POSITION_FILE_DIR = cmdargs.position_file_dir
-POSITION_FILE_NAME = POSITION_FILE_DIR.split('/')[-1]
+PITCHBOOK_FILE_DIR = cmdargs.pitchbook_file_dir
+PITCHBOOK_FILE_NAME = PITCHBOOK_FILE_DIR.split('/')[-1]
 
 # Folders directories
 ROOT = "/Users/jing/Documents/RaShips/revelio_matching"
@@ -261,9 +261,8 @@ with open(EMBEDDINGS_FILES_LEGEND, 'r') as file:
 
 columns_mappings = columns_mappings_legend.get(COLUMN_MAPPINGS_INDEX)
 pitchbook_mappings = columns_mappings.get('pitchbook')
-position_mappings = columns_mappings.get('position')
 
-cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
+cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/{PITCHBOOK_FILE_NAME}")
 
  # Load the sentence transformer model
 TRUST_REMOTE_CODE = MODEL_NAME in [
@@ -277,12 +276,11 @@ max_length = tokenizer.model_max_length
 # Dictionary to store all embeddings
 all_embeddings = dict()
 all_embeddings['pitchbook'] = dict()
-all_embeddings['position'] = dict()
 
 pitchbook_ids = cleaned_pitchbook.companyid.to_list()
 
 # Generating embeddings for pitchbook
-tqdm.write('Generating embedding inputs for pitchbook')
+tqdm.write(F'Generating embedding inputs for pitchbook file: {PITCHBOOK_FILE_NAME}')
 pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)
 
 all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
@@ -293,37 +291,4 @@ all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
                                             model_name=MODEL_NAME,
                                             file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
 
-
-tqdm.write('Iterating over positions files:')
-
-
-if 'csv' in POSITION_FILE_NAME:
-    cleaned_file = pd.read_csv(f'{PROCESSED_FOLDER}/{POSITION_FILE_NAME}')
-elif ".parquet" in POSITION_FILE_NAME:
-    cleaned_file = pd.read_parquet(f'{PROCESSED_FOLDER}/{POSITION_FILE_NAME}')
-else:
-    cleaned_file = pd.DataFrame()
-
-if cleaned_file.shape[0] > 0:
-    
-    cleaned_file.index = cleaned_file.index
-    cleaned_file['id'] = cleaned_file.apply(lambda x : str(x['rcid']) + '_' + POSITION_FILE_NAME, axis = 1)
-
-    # Extract positions company ids
-    positions_ids_first = cleaned_file.id.to_list()
-    positions_ids = [str(id) for id in positions_ids_first]
-    
-    tqdm.write('Generating embedding inputs for position')
-    position_texts = generate_embedding_inputs(columns_mappings=position_mappings, data=cleaned_file)
-
-    # --- Generate Embeddings for positions file --
-    
-    # Encode position files
-    all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
-                                        dataset='position',
-                                        dir_list=positions_ids,
-                                        texts_list=position_texts,
-                                        model=model,
-                                        model_name=MODEL_NAME,
-                                        file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
 

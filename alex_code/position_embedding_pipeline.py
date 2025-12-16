@@ -260,41 +260,23 @@ with open(EMBEDDINGS_FILES_LEGEND, 'r') as file:
     columns_mappings_legend = json.load(file)
 
 columns_mappings = columns_mappings_legend.get(COLUMN_MAPPINGS_INDEX)
-pitchbook_mappings = columns_mappings.get('pitchbook')
 position_mappings = columns_mappings.get('position')
-
-cleaned_pitchbook = pd.read_parquet(f"{PROCESSED_FOLDER}/pitchbook_company_cleaned.parquet")
 
  # Load the sentence transformer model
 TRUST_REMOTE_CODE = MODEL_NAME in [
         "Lajavaness/bilingual-embedding-small",
         "Alibaba-NLP/gte-multilingual-base"
     ]
+
 model = SentenceTransformer(model_name_or_path=MODEL_NAME, trust_remote_code=TRUST_REMOTE_CODE)
 tokenizer = model.tokenizer
 max_length = tokenizer.model_max_length
 
 # Dictionary to store all embeddings
 all_embeddings = dict()
-all_embeddings['pitchbook'] = dict()
 all_embeddings['position'] = dict()
 
-pitchbook_ids = cleaned_pitchbook.companyid.to_list()
-
-# Generating embeddings for pitchbook
-tqdm.write('Generating embedding inputs for pitchbook')
-pitchbook_texts = generate_embedding_inputs(columns_mappings=pitchbook_mappings, data=cleaned_pitchbook)
-
-all_embeddings = generate_embeddings(embeddings_dict=all_embeddings,
-                                            dataset='pitchbook',
-                                            dir_list=pitchbook_ids,
-                                            texts_list=pitchbook_texts,
-                                            model=model,
-                                            model_name=MODEL_NAME,
-                                            file_name=f"embeddings_{COLUMN_MAPPINGS_INDEX}")
-
-
-tqdm.write('Iterating over positions files:')
+tqdm.write(f'Iterating over positions file: {POSITION_FILE_NAME}')
 
 
 if 'csv' in POSITION_FILE_NAME:
