@@ -104,6 +104,9 @@ pos_filtered = {k: v for k, v in pos_embeddings_first.items() if k not in UNWANT
 pb_embeddings = list(pb_filtered.values())
 pos_embeddings = list(pos_filtered.values())
 
+pb_indexes = list(pb_filtered.keys())
+pos_indexes = list(pos_filtered.keys())
+
 model_name = EMBEDDINGS_FILE_DIR.split('/')[-1].split('.')[0].split('_')[2]
 
 columns_mapping_index = EMBEDDINGS_FILE_DIR.split('/')[-1].split('_')[1]
@@ -117,7 +120,6 @@ matches['sim_score'] = []
 i = 0
 total = min(len(pos_embeddings), len(pb_embeddings))
 
-index_position_mapping, shifted_original_mapping = get_index_position_file_mapping(cleaned_file_files=all_cleaned_position_files)
 file_to_be_opened = ''
 
 with tqdm(total=total) as p_bar:
@@ -130,23 +132,23 @@ with tqdm(total=total) as p_bar:
         max_pb_coordinate = max_coordinates[1][0]
 
         max_pos_embedding = pos_embeddings[max_pos_coordinate]
-        for k,v in pos_filtered.items():
-            if v == max_pos_embedding:
-                max_k = int(k.split('_')[-1])
+        max_pos_index = pos_indexes[max_pos_coordinate]
+        max_pos_file = '_'.join(max_pos_index.split('_')[1:])
+        max_pos_position = max_pos_index.split('_')[0]
 
-        if index_position_mapping[max_k] != file_to_be_opened:
+        if max_pos_file != file_to_be_opened:
 
-            file_to_be_opened = index_position_mapping[max_k]
+            file_to_be_opened = max_pos_file
             cleaned_file = pd.read_parquet(f"{PROCESSED_FOLDER}/{file_to_be_opened}")
 
         for column in pos_column_mapping.keys():
 
-            if column in cleaned_file.columns and shifted_original_mapping[max_k] in cleaned_file.index:
+            if column in cleaned_file.columns and max_pos_position in cleaned_file.index:
 
                 col_name = f'{column}_pos'
                 if col_name not in matches:
                     matches[col_name] = []
-                matches[col_name].append(cleaned_file.loc[shifted_original_mapping[max_k], column])
+                matches[col_name].append(cleaned_file.loc[max_pos_position, column])
 
         for column in pb_column_mapping.keys():
             if column not in cleaned_pitchbook.columns:
